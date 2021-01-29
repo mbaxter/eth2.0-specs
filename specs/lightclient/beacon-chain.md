@@ -38,14 +38,10 @@
     - [New `process_deposit`](#new-process_deposit)
     - [Sync committee processing](#sync-committee-processing)
   - [Epoch processing](#epoch-processing)
-<<<<<<< HEAD
-    - [New `process_justification_and_finalization`](#new-process_justification_and_finalization)
-    - [New `process_rewards_and_penalties`](#new-process_rewards_and_penalties)
-    - [Final updates](#final-updates)
-=======
-    - [Components of attestation deltas](#components-of-attestation-deltas)
+    - [Justification and finalization](#justification-and-finalization)
+    - [Rewards and penalties](#rewards-and-penalties)
+    - [Participation records rotation](#participation-records-rotation)
     - [Sync committee updates](#sync-committee-updates)
->>>>>>> dev
 
 <!-- END doctoc generated TOC please keep comment here to allow auto update -->
 <!-- /TOC -->
@@ -200,8 +196,6 @@ def get_flags_and_numerators() -> Sequence[Tuple[int, int]]:
         (TIMELY_TARGET_FLAG, TIMELY_TARGET_NUMERATOR)
     )
 ```
-
-
 
 ### Beacon state accessors
 
@@ -398,7 +392,6 @@ def process_attestation(state: BeaconState, attestation: Attestation) -> None:
     increase_balance(state, get_beacon_proposer_index(state), proposer_reward)
 ```
 
-
 #### New `process_deposit`
 
 *Note*: The function `process_deposit` is modified to initialize `previous_epoch_participation` and `current_epoch_participation`.
@@ -475,11 +468,10 @@ def process_sync_committee(state: BeaconState, body: BeaconBlockBody) -> None:
 
 ### Epoch processing
 
-#### New `process_justification_and_finalization`
 ```python
 def process_epoch(state: BeaconState) -> None:
-    process_justification_and_finalization(state)
-    process_rewards_and_penalties(state)
+    process_justification_and_finalization(state)  # Updated in HF1
+    process_rewards_and_penalties(state)  # Updated in HF1
     process_registry_updates(state)
     process_slashings(state)
     process_eth1_data_reset(state)
@@ -487,12 +479,13 @@ def process_epoch(state: BeaconState) -> None:
     process_slashings_reset(state)
     process_randao_mixes_reset(state)
     process_historical_roots_update(state)
-    process_participation_record_updates(state)
-    # Light client patch
+    # Note: Removed `process_participation_record_updates`.
+    # HF1
+    process_epoch_participation_updates(state)
     process_sync_committee_updates(state)
 ```
 
-#### Components of attestation deltas
+#### Justification and finalization
 
 *Note*: The function `process_justification_and_finalization` is modified with `matching_target_attestations` replaced by `matching_target_indices`.
 
@@ -538,7 +531,7 @@ def process_justification_and_finalization(state: BeaconState) -> None:
         state.finalized_checkpoint = old_current_justified_checkpoint
 ```
 
-#### New `process_rewards_and_penalties`
+#### Rewards and penalties
 
 *Note*: The function `process_rewards_and_penalties` is modified to use participation flag deltas.
 
@@ -555,6 +548,17 @@ def process_rewards_and_penalties(state: BeaconState) -> None:
             decrease_balance(state, ValidatorIndex(index), penalties[index])
 ```
 
+#### Participation records rotation
+
+```python
+def process_epoch_participation_updates(state: BeaconState) -> None:
+    """
+    Rotate current/previous epoch participation flags.
+    """
+    state.previous_epoch_participation = state.current_epoch_participation
+    state.current_epoch_participation = [Bitvector[PARTICIPATION_FLAGS_LENGTH]() for _ in range(len(state.validators))]
+```
+
 #### Sync committee updates
 
 ```python
@@ -563,27 +567,4 @@ def process_sync_committee_updates(state: BeaconState) -> None:
     if next_epoch % EPOCHS_PER_SYNC_COMMITTEE_PERIOD == 0:
         state.current_sync_committee = state.next_sync_committee
         state.next_sync_committee = get_sync_committee(state, next_epoch + EPOCHS_PER_SYNC_COMMITTEE_PERIOD)
-    # Update effective balances with hysteresis
-    for index, validator in enumerate(state.validators):
-        balance = state.balances[index]
-        HYSTERESIS_INCREMENT = uint64(EFFECTIVE_BALANCE_INCREMENT // HYSTERESIS_QUOTIENT)
-        DOWNWARD_THRESHOLD = HYSTERESIS_INCREMENT * HYSTERESIS_DOWNWARD_MULTIPLIER
-        UPWARD_THRESHOLD = HYSTERESIS_INCREMENT * HYSTERESIS_UPWARD_MULTIPLIER
-        if (
-            balance + DOWNWARD_THRESHOLD < validator.effective_balance
-            or validator.effective_balance + UPWARD_THRESHOLD < balance
-        ):
-            validator.effective_balance = min(balance - balance % EFFECTIVE_BALANCE_INCREMENT, MAX_EFFECTIVE_BALANCE)
-    # Reset slashings
-    state.slashings[next_epoch % EPOCHS_PER_SLASHINGS_VECTOR] = Gwei(0)
-    # Set randao mix
-    state.randao_mixes[next_epoch % EPOCHS_PER_HISTORICAL_VECTOR] = get_randao_mix(state, current_epoch)
-    # Set historical root accumulator
-    if next_epoch % (SLOTS_PER_HISTORICAL_ROOT // SLOTS_PER_EPOCH) == 0:
-        historical_batch = HistoricalBatch(block_roots=state.block_roots, state_roots=state.state_roots)
-        state.historical_roots.append(hash_tree_root(historical_batch))
-    # [Added in hf-1] Rotate current/previous epoch participation flags
-    state.previous_epoch_participation = state.current_epoch_participation
-    state.current_epoch_participation = [Bitvector[PARTICIPATION_FLAGS_LENGTH]() for _ in range(len(state.validators))]
-    # [Removed in hf-1] Rotate current/previous epoch attestations
 ```
