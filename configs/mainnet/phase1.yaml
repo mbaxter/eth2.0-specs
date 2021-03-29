@@ -6,7 +6,7 @@ CONFIG_NAME: "mainnet"
 # ---------------------------------------------------------------
 PHASE_1_FORK_VERSION: 0x01000000
 # [STUB]
-PHASE_1_FORK_SLOT: 0
+PHASE_1_FORK_EPOCH: 18446744073709551615
 INITIAL_ACTIVE_SHARDS: 64
 
 
